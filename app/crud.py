@@ -1,91 +1,51 @@
-from .models import PlayerDB
-# for including Error handling add below import as well
-from fastapi import HTTPException
+"""Database operations only. HTTP errors are handled in the routers."""
+from sqlalchemy.orm import Session
 
-def create_player(db, player):
-  new_player = PlayerDB(name=player.name, team=player.team)
-  db.add(new_player)
-  db.commit()
-  db.refresh(new_player)
-  return new_player
-
-#def get_players(db):
-#  return db.query(PlayerDB).all()
-# commenting above line because there is no erorr handling.
-
-def get_players(db):
-  players = db.query(PlayerDB).all()
-  if not players:
-    raise HTTPException(status_code=404, detail="No players found")
-  return players
-
-#def update_player(db, player_id, player):
-#  db_player = db.query(PlayerDB).filter(PlayerDB.id == player_id).first()
-  
-#  if not db_player:
-#    return None
-
-#  db_player.name = player.name
-#  db_player.team = player.team
-
-#  db.commit()
-#  db.refresh(db_player)
-#  return db_player
-
-def update_player(db, player_id, player):
-  db_player = db.query(PlayerDB).filter(PlayerDB.id == player_id).first()
-
-  if not db_player:
-    raise HTTPException(status_code=404, detail="Player not found")
-
-  db_player.name = player.name
-  db_player.team = player.team
-
-  db.commit()
-  db.refresh(db_player)
-  return db_player
-
-#def delete_player(db, player_id):
-#  player = db.query(PlayerDB).filter(PlayerDB.id == player_id).first()
-
-#  if not player:
-#    return None
-
-#  db.delete(player)
-#  db.commit()
-#  return {"message": "Deleted successfully"}
-
-def delete_player(db, player_id):
-  db_player = db.query(PlayerDB).filter(PlayerDB.id == player_id).first()
-
-  if not db_player:
-    raise HTTPException(status_code=404, detail="Player not found")
-
-  db.delete(db_player)
-  db.commit()
-
-  return {"message": "Player deleted successfully"}
+from .models import PlayerDB, UserDB
 
 
-# This below lines are added newly to implenent JWT concept please remember.
-
-from .models import UserDB
-from .auth import hash_password
-
-def create_user(db, user):
-  hashed = hash_password(user.password)
-  db_user = UserDB(username=user.username, password=hashed)
-  db.add(db_user)
-  db.commit()
-  db.refresh(db_user)
-  return db_user
+# ---- users ----
+def get_user_by_username(db: Session, username: str):
+    return db.query(UserDB).filter(UserDB.username == username).first()
 
 
-def authenticate_user(db, username, password):
-  user = db.query(UserDB).filter(UserDB.username == username).first()
-  if not user:
-    return None
-  from .auth import verify_password
-  if not verify_password(password, user.password):
-    return None
-  return user
+def list_users(db: Session):
+    return db.query(UserDB).all()
+
+
+def create_user(db: Session, username: str, hashed_password: str):
+    user = UserDB(username=username, password=hashed_password)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# ---- players ----
+def get_players(db: Session):
+    return db.query(PlayerDB).all()
+
+
+def get_player(db: Session, player_id: int):
+    return db.query(PlayerDB).filter(PlayerDB.id == player_id).first()
+
+
+def create_player(db: Session, name: str, team: str, owner_id: int):
+    player = PlayerDB(name=name, team=team, owner_id=owner_id)
+    db.add(player)
+    db.commit()
+    db.refresh(player)
+    return player
+
+
+def update_player(db: Session, player: PlayerDB, name: str, team: str):
+    player.name = name
+    player.team = team
+    db.commit()
+    db.refresh(player)
+    return player
+
+
+def delete_player(db: Session, player: PlayerDB):
+    db.delete(player)
+    db.commit()
