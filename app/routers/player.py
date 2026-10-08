@@ -1,81 +1,65 @@
-# 📌 FILE: player.py
-
-# 🧠 NOTE:
-
-# Is project mein FastAPI ka best practice use kiya gaya hai:
-# db: Session = Depends(get_db)
-
-# 👉 Iska matlab:
-# - Har API ke liye DB session automatically create hota hai
-# - Request ke baad automatically close ho jata hai
-
-# 👉 Benefit:
-# ✔ clean code
-# ✔ no connection leak
-# ✔ production-ready
-# ✔ scalable approach
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
+from .. import crud, models, schemas
+from ..auth import get_current_user
 from ..database import get_db
-from .. import crud, schemas
-from ..auth import get_current_user # this import added for Protected route concept.
 
-router = APIRouter()
+router = APIRouter(tags=["players"])
 
 
-# CREATE → new player add karna
-# But need to comment this as we are now loking to add Response Model control and validate the output data returned to the client.
-# Or we can saw no extra and optional data will be returned only limited ones.
-#@router.post("/player")
-#def create(player: schemas.PlayerCreate, db: Session = Depends(get_db)):
-#  return crud.create_player(db, player)
+def get_player_or_404(db: Session, player_id: int) -> models.PlayerDB:
+    player = crud.get_player(db, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return player
 
 
-# READ → sab players fetch karna
-#@router.get("/players")
-#def read(db: Session = Depends(get_db)):
-#  return crud.get_players(db)
+def check_can_modify(player: models.PlayerDB, user: models.UserDB) -> None:
+    """Only the owner or an admin may change or delete a player."""
+    if player.owner_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="You do not own this player")
 
 
-# UPDATE → existing player update karna
-#@router.put("/player/{player_id}")
-#def update(player_id: int, player: schemas.PlayerCreate, db: Session = Depends(get_db)):
-#  return crud.update_player(db, player_id, player)
+# Public: anyone can read.
+@router.get("/players", response_model=list[schemas.PlayerResponse])
+def list_players(db: Session = Depends(get_db)):
+    return crud.get_players(db)  # an empty list is a valid answer (200), not an error
 
 
-# DELETE → player remove karna
-#@router.delete("/player/{player_id}")
-#def delete(player_id: int, db: Session = Depends(get_db)):
-#  return crud.delete_player(db, player_id)
-
-# CREATE → new player add karna with having response model
-@router.post("/player", response_model=schemas.PlayerResponse)
-def create(player: schemas.PlayerCreate, db: Session = Depends(get_db)):
-  return crud.create_player(db, player)
+@router.get("/player/{player_id}", response_model=schemas.PlayerResponse)
+def read_player(player_id: int, db: Session = Depends(get_db)):
+    return get_player_or_404(db, player_id)
 
 
-# READ → sab players fetch karna using response model
-from typing import List
-
-@router.get("/players", response_model=List[schemas.PlayerResponse])
-#This below read function I'll comment and modify it so that it will supoort protected routes concept in JWT.
-#def read(db: Session = Depends(get_db)):
-#  return crud.get_players(db
-# Now modifying this to support protected routes.
-def read(
-  db: Session = Depends(get_db),
-  user: str = Depends(get_current_user)   # 👈 add this
+# Protected: login required.
+@router.post("/player", response_model=schemas.PlayerResponse, status_code=201)
+def create_player(
+    player: schemas.PlayerCreate,
+    db: Session = Depends(get_db),
+    user: models.UserDB = Depends(get_current_user),
 ):
-  return crud.get_players(db)
+    return crud.create_player(db, player.name, player.team, owner_id=user.id)
 
-# UPDATE → existing player update karna using response model..
+
 @router.put("/player/{player_id}", response_model=schemas.PlayerResponse)
-def update(player_id: int, player: schemas.PlayerCreate, db: Session = Depends(get_db)):
-  return crud.update_player(db, player_id, player)
+def update_player(
+    player_id: int,
+    data: schemas.PlayerCreate,
+    db: Session = Depends(get_db),
+    user: models.UserDB = Depends(get_current_user),
+):
+    player = get_player_or_404(db, player_id)
+    check_can_modify(player, user)
+    return crud.update_player(db, player, data.name, data.team)
 
 
-# DELETE → player remove karna using response model
-@router.delete("/player/{player_id}")
-def delete(player_id: int, db: Session = Depends(get_db)):
-  return crud.delete_player(db, player_id)
+@router.delete("/player/{player_id}", status_code=204)
+def delete_player(
+    player_id: int,
+    db: Session = Depends(get_db),
+    user: models.UserDB = Depends(get_current_user),
+):
+    player = get_player_or_404(db, player_id)
+    check_can_modify(player, user)
+    crud.delete_player(db, player)

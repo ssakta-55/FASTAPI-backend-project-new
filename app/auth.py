@@ -1,48 +1,61 @@
-#This file created at the time of JWT implementation .
+from datetime import datetime, timedelta, timezone
 
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-
-SECRET_KEY = "mysecretkey"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def hash_password(password: str):
-  return pwd_context.hash(password)
-
-
-def verify_password(plain, hashed):
-  return pwd_context.verify(plain, hashed)
-
-
-def create_access_token(data: dict):
-  to_encode = data.copy()
-  expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-  to_encode.update({"exp": expire})
-  return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-# This below line coming for using Protected routes in JWT concept.
-
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
 
+from . import models
+from .config import settings
+from .database import get_db
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
-  try:
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    username = payload.get("sub")
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
 
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+
+def create_access_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.access_token_expire_minutes
+    )
+    to_encode["exp"] = expire
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> models.UserDB:
+    """Authentication: who is making this request?"""
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        username = payload.get("sub")
+    except JWTError:
+        raise credentials_error
     if username is None:
-      raise HTTPException(status_code=401, detail="Invalid token")
+        raise credentials_error
 
-    return username
+    user = db.query(models.UserDB).filter(models.UserDB.username == username).first()
+    if user is None:
+        raise credentials_error
+    return user
 
-  except JWTError:
-    raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_admin(user: models.UserDB = Depends(get_current_user)) -> models.UserDB:
+    """Authorization: is this user allowed to do this?"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
