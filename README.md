@@ -1,23 +1,35 @@
 # Match Score API
 
-A FastAPI backend for managing players and matches, with JWT authentication, role-based access and owner-only editing.
+A FastAPI backend for matches, scores and a live leaderboard, with JWT authentication, role-based access, owner-only editing, PostgreSQL, Alembic migrations and automated tests.
 
-**Stack:** Python, FastAPI, SQLAlchemy, Pydantic, JWT (python-jose), bcrypt, SQLite (PostgreSQL planned)
+**Stack:** Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL, Pydantic, JWT (python-jose), bcrypt, pytest
 
 ## Run locally
 
 ```bash
-python -m venv venv && source venv/bin/activate      # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env                                  # then set SECRET_KEY
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env            # then set SECRET_KEY
+docker compose up -d db         # starts PostgreSQL on port 5432
+alembic upgrade head            # creates the tables
 uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000/docs for the interactive Swagger UI.
 
-Generate a secret key: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+**No Docker?** Set `DATABASE_URL=sqlite:///./test.db` in `.env` (or use a hosted PostgreSQL connection string), skip the `docker compose` line, and run the rest. The migration works on both SQLite and PostgreSQL.
 
-Make a user an admin: `python -m app.make_admin <username>`
+- Generate a secret key: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+- Make a user an admin: `python -m app.make_admin <username>`
+- After changing `app/models.py`: `alembic revision --autogenerate -m "describe change"` then `alembic upgrade head`
+
+## Tests
+
+```bash
+pytest --cov=app --cov-report=term-missing
+```
+
+Tests use an in-memory SQLite database, so they need neither Docker nor PostgreSQL.
 
 ## Endpoints
 
@@ -28,16 +40,25 @@ Make a user an admin: `python -m app.make_admin <username>`
 | POST | /login | public | Get JWT access token |
 | GET | /me | logged in | Current user |
 | GET | /users | admin | List all users |
-| GET | /players | public | List players |
+| GET | /players | public | List players (`limit`, `offset`) |
 | GET | /player/{id} | public | Get one player |
 | POST | /player | logged in | Create player (you become the owner) |
 | PUT | /player/{id} | owner or admin | Update player |
 | DELETE | /player/{id} | owner or admin | Delete player |
+| GET | /matches | public | List matches (`status`, `limit`, `offset`) |
+| GET | /matches/{id} | public | Get one match |
+| POST | /matches | logged in | Create match (you become the owner) |
+| PATCH | /matches/{id}/score | owner or admin | Update score and status |
+| DELETE | /matches/{id} | owner or admin | Delete match |
+| GET | /leaderboard | public | Standings from finished matches (win 3, draw 1, loss 0) |
+
+List endpoints return `{ "items": [...], "total": N, "limit": L, "offset": O }`.
 
 ## Roadmap
 
 - [x] Stage 1: config, response models, error handling, authorization
-- [ ] Stage 2: PostgreSQL, Alembic migrations, pagination, pytest
+- [x] Stage 2: PostgreSQL, Alembic migrations, matches and leaderboard, pagination, pytest
 - [ ] Stage 3: Redis caching, rate limiting
 - [ ] Stage 4: Celery background jobs, WebSocket live updates
 - [ ] Stage 5: Docker, GitHub Actions CI, AWS deployment
+- [ ] AI module: RAG question answering with pgvector
