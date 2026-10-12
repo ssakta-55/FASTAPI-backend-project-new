@@ -59,3 +59,9 @@ def require_admin(user: models.UserDB = Depends(get_current_user)) -> models.Use
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def ensure_owner_or_admin(owner_id: int, user: models.UserDB) -> None:
+    """Only the owner of a record, or an admin, may change or delete it."""
+    if owner_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="You do not own this record")

@@ -1,13 +1,12 @@
 from fastapi import FastAPI
 
-from .database import Base, engine
-from .routers import auth, player
+from .routers import auth, matches, player
 
-Base.metadata.create_all(bind=engine)  # replaced by Alembic migrations in Stage 2
-
+# The database schema is now created by Alembic migrations: run `alembic upgrade head`.
 app = FastAPI(title="Match Score API")
 app.include_router(auth.router)
 app.include_router(player.router)
+app.include_router(matches.router)
 
 
 @app.get("/health", tags=["meta"])
