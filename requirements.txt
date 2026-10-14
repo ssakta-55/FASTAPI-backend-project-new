@@ -3,6 +3,7 @@ uvicorn[standard]
 sqlalchemy
 alembic
 psycopg2-binary
+redis
 python-jose[cryptography]
 passlib[bcrypt]
 bcrypt==4.0.1
