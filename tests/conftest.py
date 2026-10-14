@@ -2,6 +2,7 @@ import os
 
 # Must be set before the app is imported, because settings are read at import time.
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+os.environ["REDIS_URL"] = ""  # tests must never talk to a real Redis
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,9 +10,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.cache import cache
 from app.database import Base, get_db
 from app.main import app
 from app.models import UserDB
+
+
+@pytest.fixture(autouse=True)
+def clean_cache():
+    """Cache entries and rate-limit counters must not leak from one test to the next."""
+    cache.clear()
+    yield
+    cache.clear()
 
 
 @pytest.fixture()
