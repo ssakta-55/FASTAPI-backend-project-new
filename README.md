@@ -2,7 +2,7 @@
 
 A FastAPI backend for matches, scores and a live leaderboard, with JWT authentication, role-based access, owner-only editing, PostgreSQL, Alembic migrations and automated tests.
 
-**Stack:** Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL, Pydantic, JWT (python-jose), bcrypt, pytest
+**Stack:** Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL, Redis, Pydantic, JWT (python-jose), bcrypt, pytest
 
 ## Run locally
 
@@ -22,6 +22,12 @@ Open http://127.0.0.1:8000/docs for the interactive Swagger UI.
 - Generate a secret key: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 - Make a user an admin: `python -m app.make_admin <username>`
 - After changing `app/models.py`: `alembic revision --autogenerate -m "describe change"` then `alembic upgrade head`
+
+## Caching and rate limiting
+
+- `GET /leaderboard` is cached for 30 seconds (cache-aside). The response header `X-Cache` shows `HIT` or `MISS`. The cache is cleared whenever a match score changes or a match is deleted.
+- Rate limits (fixed window, 60 seconds): `/login` 5 per IP, `/register` 10 per IP, and all write endpoints 30 per user. Over the limit the API returns `429` with a `Retry-After` header.
+- Set `REDIS_URL` in `.env` to share cache and counters between server processes. Without it, an in-memory backend is used. If Redis goes down, the API keeps working without a cache and without rate limiting (fail open).
 
 ## Tests
 
@@ -58,7 +64,7 @@ List endpoints return `{ "items": [...], "total": N, "limit": L, "offset": O }`.
 
 - [x] Stage 1: config, response models, error handling, authorization
 - [x] Stage 2: PostgreSQL, Alembic migrations, matches and leaderboard, pagination, pytest
-- [ ] Stage 3: Redis caching, rate limiting
+- [x] Stage 3: Redis caching, rate limiting
 - [ ] Stage 4: Celery background jobs, WebSocket live updates
 - [ ] Stage 5: Docker, GitHub Actions CI, AWS deployment
 - [ ] AI module: RAG question answering with pgvector

@@ -11,18 +11,24 @@ from ..auth import (
     verify_password,
 )
 from ..database import get_db
+from ..ratelimit import login_limit, register_limit
 
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/register", response_model=schemas.UserResponse, status_code=201)
+@router.post(
+    "/register",
+    response_model=schemas.UserResponse,
+    status_code=201,
+    dependencies=[Depends(register_limit)],
+)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     if crud.get_user_by_username(db, user.username):
         raise HTTPException(status_code=409, detail="Username already taken")
     return crud.create_user(db, user.username, hash_password(user.password))
 
 
-@router.post("/login", response_model=schemas.Token)
+@router.post("/login", response_model=schemas.Token, dependencies=[Depends(login_limit)])
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
 ):

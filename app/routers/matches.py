@@ -1,11 +1,15 @@
+import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..auth import ensure_owner_or_admin, get_current_user
+from ..cache import LEADERBOARD_KEY, cache
+from ..config import settings
 from ..database import get_db
+from ..ratelimit import write_limit
 
 router = APIRouter(tags=["matches"])
 
@@ -39,12 +43,26 @@ def read_match(match_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/leaderboard", response_model=List[schemas.LeaderboardRow])
-def leaderboard(db: Session = Depends(get_db)):
-    return crud.get_leaderboard(db)
+def leaderboard(response: Response, db: Session = Depends(get_db)):
+    """Cache-aside: look in the cache first, ask the database only on a miss."""
+    cached = cache.get(LEADERBOARD_KEY)
+    if cached is not None:
+        response.headers["X-Cache"] = "HIT"
+        return json.loads(cached)
+
+    table = crud.get_leaderboard(db)
+    cache.set(LEADERBOARD_KEY, json.dumps(table), settings.cache_ttl_seconds)
+    response.headers["X-Cache"] = "MISS"
+    return table
 
 
 # Protected: login required.
-@router.post("/matches", response_model=schemas.MatchResponse, status_code=201)
+@router.post(
+    "/matches",
+    response_model=schemas.MatchResponse,
+    status_code=201,
+    dependencies=[Depends(write_limit)],
+)
 def create_match(
     match: schemas.MatchCreate,
     db: Session = Depends(get_db),
@@ -53,7 +71,11 @@ def create_match(
     return crud.create_match(db, match.home_team, match.away_team, created_by=user.id)
 
 
-@router.patch("/matches/{match_id}/score", response_model=schemas.MatchResponse)
+@router.patch(
+    "/matches/{match_id}/score",
+    response_model=schemas.MatchResponse,
+    dependencies=[Depends(write_limit)],
+)
 def update_score(
     match_id: int,
     data: schemas.MatchScoreUpdate,
@@ -62,10 +84,12 @@ def update_score(
 ):
     match = get_match_or_404(db, match_id)
     ensure_owner_or_admin(match.created_by, user)
-    return crud.update_match_score(db, match, data.home_score, data.away_score, data.status)
+    updated = crud.update_match_score(db, match, data.home_score, data.away_score, data.status)
+    cache.delete(LEADERBOARD_KEY)  # standings may have changed
+    return updated
 
 
-@router.delete("/matches/{match_id}", status_code=204)
+@router.delete("/matches/{match_id}", status_code=204, dependencies=[Depends(write_limit)])
 def delete_match(
     match_id: int,
     db: Session = Depends(get_db),
@@ -74,3 +98,4 @@ def delete_match(
     match = get_match_or_404(db, match_id)
     ensure_owner_or_admin(match.created_by, user)
     crud.delete_match(db, match)
+    cache.delete(LEADERBOARD_KEY)  # standings may have changed
