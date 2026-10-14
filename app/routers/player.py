@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from .. import crud, models, schemas
 from ..auth import ensure_owner_or_admin, get_current_user
 from ..database import get_db
+from ..ratelimit import write_limit
 
 router = APIRouter(tags=["players"])
 
@@ -36,7 +37,12 @@ def read_player(player_id: int, db: Session = Depends(get_db)):
 
 
 # Protected: login required.
-@router.post("/player", response_model=schemas.PlayerResponse, status_code=201)
+@router.post(
+    "/player",
+    response_model=schemas.PlayerResponse,
+    status_code=201,
+    dependencies=[Depends(write_limit)],
+)
 def create_player(
     player: schemas.PlayerCreate,
     db: Session = Depends(get_db),
@@ -45,7 +51,11 @@ def create_player(
     return crud.create_player(db, player.name, player.team, owner_id=user.id)
 
 
-@router.put("/player/{player_id}", response_model=schemas.PlayerResponse)
+@router.put(
+    "/player/{player_id}",
+    response_model=schemas.PlayerResponse,
+    dependencies=[Depends(write_limit)],
+)
 def update_player(
     player_id: int,
     data: schemas.PlayerCreate,
@@ -57,7 +67,7 @@ def update_player(
     return crud.update_player(db, player, data.name, data.team)
 
 
-@router.delete("/player/{player_id}", status_code=204)
+@router.delete("/player/{player_id}", status_code=204, dependencies=[Depends(write_limit)])
 def delete_player(
     player_id: int,
     db: Session = Depends(get_db),
