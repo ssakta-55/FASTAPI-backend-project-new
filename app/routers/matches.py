@@ -10,6 +10,8 @@ from ..cache import LEADERBOARD_KEY, cache
 from ..config import settings
 from ..database import get_db
 from ..ratelimit import write_limit
+from ..realtime import publish
+from ..tasks import enqueue_match_finished
 
 router = APIRouter(tags=["matches"])
 
@@ -84,8 +86,23 @@ def update_score(
 ):
     match = get_match_or_404(db, match_id)
     ensure_owner_or_admin(match.created_by, user)
+    was_finished = match.status == "finished"
     updated = crud.update_match_score(db, match, data.home_score, data.away_score, data.status)
     cache.delete(LEADERBOARD_KEY)  # standings may have changed
+
+    # Tell everyone who is watching, right now.
+    publish(
+        f"match:{updated.id}",
+        {
+            "type": "score_update",
+            "match": schemas.MatchResponse.model_validate(updated).model_dump(mode="json"),
+        },
+    )
+    publish("leaderboard", {"type": "leaderboard_changed"})
+
+    # Slow work goes to the background worker, and only once per match.
+    if updated.status == "finished" and not was_finished:
+        enqueue_match_finished(updated.id)
     return updated
 
 
@@ -99,3 +116,5 @@ def delete_match(
     ensure_owner_or_admin(match.created_by, user)
     crud.delete_match(db, match)
     cache.delete(LEADERBOARD_KEY)  # standings may have changed
+    publish(f"match:{match_id}", {"type": "match_deleted", "match_id": match_id})
+    publish("leaderboard", {"type": "leaderboard_changed"})
