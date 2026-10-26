@@ -3,6 +3,9 @@ import os
 # Must be set before the app is imported, because settings are read at import time.
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 os.environ["REDIS_URL"] = ""  # tests must never talk to a real Redis
+os.environ["CELERY_BROKER_URL"] = ""
+os.environ["CELERY_ALWAYS_EAGER"] = "true"  # background jobs run immediately inside the test
+os.environ["WEBHOOK_URL"] = ""  # tests must never call a real webhook
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.cache import cache
+from app import tasks as tasks_module
 from app.database import Base, get_db
 from app.main import app
 from app.models import UserDB
@@ -41,9 +45,12 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    original_session_factory = tasks_module.SessionLocal
+    tasks_module.SessionLocal = TestingSession  # background jobs use the test database too
     with TestClient(app) as test_client:
         test_client.session_factory = TestingSession
         yield test_client
+    tasks_module.SessionLocal = original_session_factory
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
 
